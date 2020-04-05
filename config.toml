@@ -1,0 +1,71 @@
+baseURL = "/"
+languageCode = "en-us"
+title = "Random Genomes"
+theme = "hugo-vitae"
+paginate = 5
+ignoreFiles = ["\\.Rmd$", "\\.Rmarkdown$", "_files$", "_cache$"]
+
+
+copyright = "© 2020 | Santiago M."
+
+pygmentsstyle = "colorful"
+pygmentscodefences = true
+pygmentscodefencesguesssyntax = true
+
+googleAnalytics = "UA-123-45"
+disqusShortname = "hugo-vitae"
+
+[taxonomies]
+	tag = "tags"
+	series = "series"
+
+[params]
+	subtitle = "A stochastic blog about R, statistics, biology, and beyond"
+
+	# Optional 80x80 avatar image.
+	avatar = "/img/vitae.jpg"
+
+	# Content types to disable Disqus on.
+	disableDisqusTypes = ["page"]
+
+	# customCSS = "css/custom.css"  # Custom CSS applied to default styles.
+
+# Nav.
+
+[[menu.main]]
+name = "About"
+url = "/about"
+weight = 1
+
+[[menu.main]]
+name = "Publications"
+url = "/publications"
+weight = 2
+
+[[menu.main]]
+name = "Blog"
+url = "/posts"
+weight = 3
+
+
+[[menu.main]]
+name = "Tags"
+url = "/tags"
+weight = 4
+
+[[params.social]]
+    name = "Scholar"
+    icon = "fas fa-book"
+    weight = 4
+    url = "https://scholar.google.com/citations?user=XW3Sz1kAAAAJ&hl"
+
+[[params.social]]
+name = "Github"
+icon = "fab fa-github"
+url = "https://github.com/santiago1234"
+
+[[params.social]]
+    name = "Orcid"
+    icon = "fab fa-orcid"
+    weight = 3
+    url = "https://orcid.org/0000-0001-8448-3561"

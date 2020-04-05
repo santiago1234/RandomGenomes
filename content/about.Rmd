@@ -1,0 +1,20 @@
+---
+title: Santiago Gerardo Medina
+type: page
+---
+
+[<img src="/img/photo.jpg" style="max-width:25%;min-width:40px;float:right;" alt="Github repo" />](https://github.com/yihui/hugo-xmin)
+
+I am a bioinformatician working in [Ariel Bazzini's lab](https://research.stowers.org/bazzinilab/index.html) at the Stowers Institute for Medical Research. [Here](https://github.com/santiago1234/CV/blob/master/CV.pdf) you can find my CV.
+
+My research aims to better understand biological systems by extracting information from omics datasets.
+
+I’m interested in:
+
+* Computational Biology
+* Bayesian Statistics
+* Machine Learning
+
+# About the blog
+
+In this blog, I share my _**stochastic**_ toughs, notes, and ideas about math, statistics, and biology.

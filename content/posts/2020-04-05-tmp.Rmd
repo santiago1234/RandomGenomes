@@ -1,0 +1,19 @@
+---
+title: TMP
+author: ~
+date: '2020-04-05'
+slug: tmp
+math: true
+description: "Here you create a short description about the post"
+categories: []
+tags: []
+draft: yes
+---
+
+This is my first blog post
+
+A cool equation
+
+$$
+x = y^2
+$$
