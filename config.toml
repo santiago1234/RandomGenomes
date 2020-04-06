@@ -12,7 +12,7 @@ pygmentsstyle = "colorful"
 pygmentscodefences = true
 pygmentscodefencesguesssyntax = true
 
-googleAnalytics = "UA-123-45"
+googleAnalytics = "UA-162829525-1"
 disqusShortname = "hugo-vitae"
 
 [taxonomies]
