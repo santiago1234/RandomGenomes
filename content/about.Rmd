@@ -17,4 +17,4 @@ I’m interested in:
 
 # About the blog
 
-In this blog, I share my _**stochastic**_ toughs, notes, and ideas about math, statistics, and biology.
+In this blog, I share my _**stochastic**_ toughs, notes, analysis, and ideas about math, statistics, and biology.

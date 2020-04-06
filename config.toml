@@ -6,7 +6,7 @@ paginate = 5
 ignoreFiles = ["\\.Rmd$", "\\.Rmarkdown$", "_files$", "_cache$"]
 
 
-copyright = "© 2020 | Santiago M."
+copyright = "© 2020 | Santiago Gerardo Medina"
 
 pygmentsstyle = "colorful"
 pygmentscodefences = true

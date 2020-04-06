@@ -1,19 +1,337 @@
 ---
-title: TMP
-author: ~
+title: COVID-19 Death Rate
+author: Santiago G. Medina
 date: '2020-04-05'
 slug: tmp
 math: true
-description: "Here you create a short description about the post"
-categories: []
-tags: []
-draft: yes
+description: "Estimating COVID-19 death rate by country with hierarchical models"
+tags:
+  - bayesian
+  - models
+  - inference
+  - biology
+  - R
+  - analysis
+draft: no
 ---
 
-This is my first blog post
 
-A cool equation
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+## Intro
+
+[Why we still don't know what the death rate is for covid-19?](https://www.newscientist.com/article/2239497-why-we-still-dont-know-what-the-death-rate-is-for-covid-19/) Short answer: there is a lot of uncertainty.
+In this post, we will learn to incorporate this uncertainty in our inferences using a Bayesian hierarchical model.
+
+Once you get infected with coronavirus only two things can happen either you survive `r emo::ji("relaxed")` or die `r emo::ji("scream")`. Our question is: **Given that I am infected what is the probability of death considering that I live in country X?**
+
+
+## The data
+
+I will use the [tidycovid19](https://github.com/joachim-gassen/tidycovid19) package. This package downloads and tidies Covid-19 data from the [Johns Hopkins University CSSE Github Repo](https://github.com/CSSEGISandData/COVID-19). In this data, we ignore the cases that are currently infected because we don't know what will happen. Some people will die and others survive, our job is to infer how many people will die.
+
+```{r pulldata}
+library(tidyverse)
+library(ggthemes)
+library(scales)
+library(ggrepel)
+library(tidycovid19)
+library(brms)
+theme_set(theme_tufte(base_family = 'Helvetica'))
+
+merged_dta <- download_merged_data(cached = TRUE) # Pull the most recent data
+
+covid <- 
+  merged_dta %>%
+  group_by(country) %>%
+  mutate( # aggregate by country
+    reported_deaths = max(deaths),
+    reported_recovered = max(recovered)
+  ) %>%
+  slice(1:1) %>% 
+  mutate(
+    name = country,
+    R = reported_deaths + reported_recovered,
+    dead = reported_deaths
+  ) %>% 
+  select(name, R, dead) %>% 
+  ungroup()
+
+
+# add continent information
+covid$continent <- countrycode::countrycode(sourcevar = covid$name,
+                                              origin = "country.name",
+                                              destination = "continent")
+countries_to_highl <- c("Mexico", "China", "Italy", "Germany", "US")
+
+covid <- covid %>% 
+  filter(!is.na(name), !is.na(continent), R > 0)
+```
+
+The death rate, we will denote it by $\theta$, is given by:
 
 $$
-x = y^2
+\theta = \frac{\text{deads}}{\text{deads + recover}}
 $$
+
+We can estimate this from the data using the formula above.
+
+An easy way to think about this is: every time a person gets infected a coin is thrown at random with a probability $\theta$ of showing the death face. This probability will depend on multiple factors (e. g. the health of the individual, the health capacity of the country, etc.). We will use uncertainty as a way to quantify our lack of information.
+
+
+```{r boxp, fig.height=2, fig.width=4}
+covid <- 
+  covid %>% 
+  mutate(
+    dead_rate = (dead / R)
+  )
+
+covid %>% 
+  ggplot(aes(x = reorder(continent, dead_rate, median), y = dead_rate)) +
+  geom_boxplot(fill = 'grey90') +
+  geom_jitter(width = 1/5) +
+  geom_rangeframe() +
+  scale_y_continuous(labels = scales::percent) +
+  labs(
+    x = "Continent",
+    y = "Death Rate"
+  )
+```
+
+The plot above shows the distribution of death rates by continent, each dot is a country. One thing to notice is that there is a lot of variability. For example, some countries have 100% death rate while others 0%. A posible explaination for this variability is:
+
+* There exists an imbalance in sampling. For some countries, we have a few observations, 10 or less, and for other countries (e.g China) we have thousands of observations. This is due to the nature of the pandemic. In Asian countries, the pandemic is in a later stage than in the Americas where we are starting to see cases. Variability tends to be higher when we have fewer observations. We can plot the number of observations (people that were infected but now are dead or recovered) against the estimates.
+
+
+```{r s1, fig.height=4, fig.width=6}
+covid %>% 
+  ggplot(aes(x = R, y = dead_rate)) +
+  geom_point(color = "grey") +
+  geom_text_repel(data = function(x) filter(x, name %in% countries_to_highl), aes(label = name)) +
+  scale_x_sqrt(breaks = c(1000, 10000, 50000, 80000), labels = scales::unit_format(unit = "k", scale = 1e-3,caccuracy = 1)) +
+  scale_y_continuous(labels = scales::percent) +
+  geom_rangeframe(color = 'black') +
+  labs(
+    y = "Death Rate",
+    x = "Deaths + Recovered",
+    title = "Variation is higher in countries with fewer observations"
+  )
+```
+
+We can see in this plot that most of the extreme values are in the countries that have less than 1000 observations. Our estimates for these countries may be misleading.
+
+## Herarchical Model
+
+With hierarchical models, we can pool information from other countries to produce better estimates for each individual country. This will be beneficial especially for countries with only a few observations since they will receive a stronger regularization or pooling towards the global estimate. Also, for countries with fewer observations, there is more uncertainty and this will be reflected in the posterior estimates. This uncertainty is also propagated to the posterior predictions. This is why Bayes is cool!.
+
+I will use the following Bayesian Herarchical model to estimate the death rate:
+
+$$
+\begin{aligned}
+\text{deads}_i &\sim \text{Binomial}(\text{Infections}, \theta_i)\\
+logit(\theta_i) &= \alpha + \alpha_{\text{country}[i]} + \alpha_{\text{continent}[i]} \\
+\alpha_{\text{country}[i]} &\sim \text{Normal}(0,\sigma_{\text{country}}) \\
+\alpha_{\text{continent}[i]} &\sim \text{Normal}(0,\sigma_{\text{continent}}) \\
+\alpha &\sim \text{Normal}(0, 1) \\
+\sigma_{\text{country}} &\sim \text{HalfCauchy}(0, 1) \\
+\sigma_{\text{continent}} &\sim \text{HalfCauchy}(0, 1)
+\end{aligned}
+$$
+
+In this model, for each country we have a parameter $\alpha_{\text{country}[i]}$ and a paramter $\alpha_{\text{continent}[i]}$ for each continent. These parameters can be understood as deviations from the global median.
+
+
+To fit this model we will use the [brsm](https://github.com/paul-buerkner/brms) package.
+
+```r
+h_model <- 
+  brm(data = covid,
+      family = binomial,
+      dead | trials(R) ~ 1 + (1 | name) + (1 | continent),
+      iter = 6000, warmup = 1000, chains = 2, cores = 2,
+      seed = 12)
+```
+
+```{r model, include=FALSE}
+h_model <- 
+  brm(data = covid,
+      family = binomial,
+      dead | trials(R) ~ 1 + (1 | name) + (1 | continent),
+      iter = 6000, warmup = 1000, chains = 2, cores = 2,
+      seed = 12)
+```
+
+Now we can look at our new estimates after computing the posterior distribution with Markov Chain Monte Carlo.
+
+```{r, echo=FALSE, fig.height=10, fig.width=8}
+post_mdn <- 
+  coef(h_model, robust = T)$name[, , ] %>% 
+  as_tibble(rownames = 'name') %>% 
+  mutate(post_mdn = inv_logit_scaled(Estimate))
+
+
+results_mh <- coef(h_model, robust = T, probs = c(.1, .9))$name[, , ] %>% 
+  as_tibble(rownames = 'name') %>% 
+  mutate(post_mdn = inv_logit_scaled(Estimate)) %>% 
+  arrange(post_mdn)
+
+post <- posterior_samples(h_model, add_chain = T)
+
+results_df <- 
+  covid %>% 
+  select(name, R, dead, continent) %>% 
+  mutate(unpooled_estimate = dead / R) %>% 
+  inner_join(results_mh)
+
+# median
+rate_population <- inv_logit_scaled(median(post$b_Intercept))
+
+results_df %>% 
+  mutate(
+    Q10 = inv_logit_scaled(Q10),
+    Q90 = inv_logit_scaled(Q90)
+  ) %>%
+  ggplot(aes(x=reorder(name, post_mdn), y=post_mdn)) +
+  geom_hline(yintercept = rate_population, color = 'grey', size=1/3) +
+  geom_point(color='orange4', alpha=.6) +
+  geom_errorbar(aes(ymin = Q10, ymax = Q90), width = 0, color = 'orange4', alpha = .2) +
+  # geom_point(aes(y = unpooled_estimate), color='black', shape = 1) +
+  geom_rangeframe(sides = 'l', color = 'black') +
+  scale_y_continuous(labels = percent) +
+  facet_wrap(~continent, scales = "free_x", ncol = 2) +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1, size=6),
+        rect = element_rect(fill = "Light Gray", linetype = 0, colour = NA),
+        panel.grid = element_blank()) +
+  labs(
+    y = 'Death Rate',
+    title = "Posterior Estimates"
+  ) 
+
+```
+
+Good to see that Mexico has a low rate. Maybe because we eat lots of `r emo::ji("mexican")`. The grey line denotes the global estimate, the dot is the posterior estimate for each country, and the bar is the 80% highest posterior density interval.
+
+
+### COVID-19 Global Death Rate
+
+```{r, fig.height=2, fig.width=2.5}
+
+tibble(death_rate = inv_logit_scaled(post$b_Intercept)) %>% 
+  ggplot(aes(x = death_rate)) +
+  geom_density(fill = "orange1", alpha = 2/3) +
+  scale_x_continuous(labels = percent) +
+  labs(
+    title = "Global posterior estimate",
+    subtitle = '~20% people dies',
+    x = "Death rate"
+  ) +
+  theme(axis.text.y = element_blank(), axis.ticks.y = element_blank())
+
+
+```
+
+This is our global estimate. I think this number is an upper bound for the real value. Not all people are been tested. Thus, it is easy to 
+know or record a death than a recovery.
+
+```{r echo=FALSE, fig.height=6, fig.width=10}
+library(sf)
+library(rnaturalearth)
+library(rnaturalearthdata)
+
+
+world <- ne_countries(scale = "medium", returnclass = "sf") %>% 
+  mutate(
+    name = map_chr(name, ~if_else(. == "United States", "US", .))
+  )
+
+left_join(world, results_df, by = "name") %>% 
+  replace_na(list(post_mdn = mean(inv_logit_scaled(post$b_Intercept)))) %>% # replace missing values with posterior medain
+  ggplot() +
+  geom_sf(aes(fill = post_mdn)) +
+  scale_fill_viridis_c(option = 'C', labels = percent, name = "Posterior Estimate") +
+  ggdark::dark_theme_minimal() +
+  labs(
+    title = "Coronavirus Death Rate",
+    subtitle = 'Countries with missing data were imputed with the global estimate'
+  )
+
+```
+
+
+## Posterior Predictions
+
+Now, I use this model to generate projection based on a hypothetical number of infections for some countries.
+
+
+```{r echo=FALSE, fig.width=7, fig.height=3}
+# projection for my home country ------------------------------------------
+
+
+
+predictor_F <- function(ctr, cases) {
+  
+  ctr_d <- 
+    covid %>% 
+    filter(name %in% ctr) %>% 
+    select(name, continent) %>% 
+    mutate(R = cases)
+
+  
+  fitted(object = h_model, newdata = ctr_d, nsamples = 50) %>% 
+    as_tibble()
+  
+  
+}
+
+R <- 10 ** seq(1, 5.5, length.out = 20)
+
+posterior_predictions <- 
+  covid %>% 
+  filter(name %in% c("Mexico", "China", "Italy", "US", "Haiti")) %>% 
+  select(name, continent) %>% 
+  crossing(tibble(R = as.integer(R))) %>% 
+  mutate(
+    postPred = map2(name, R, predictor_F)
+  ) %>% 
+  unnest(postPred)
+
+  
+posterior_predictions %>% 
+  mutate(R = as.numeric(R)) %>% 
+  ggplot(aes(x = R, y = Estimate)) +
+  geom_ribbon(aes(ymin = Q2.5, ymax = Q97.5), fill = "orange1") +
+  geom_line(size =1/7, color = 'black') +
+  geom_rangeframe() +
+  scale_x_sqrt(labels = scales::unit_format(unit = "k", scale = 1e-3,caccuracy = 0.1)) +
+  scale_y_continuous(labels = scales::unit_format(unit = "k", scale = 1e-3,caccuracy = 0.1)) +
+  facet_grid(~name) +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1)) +
+  labs(
+    y = "Number of Deads",
+    x = "Number of infections",
+    title = "Projections"
+  )
+```
+
+We can see how the uncertainty propagates in the posterior prediction. In the plot, the orange area is a 90% posterior prediction interval. The line is the posterior prediction.
+For China, the country with more data, the model is very sure about the prediction. For Haiti, with a few observations, the model shows a wide prediction interval reflecting our lack of information.
+
+
+## Conclusion
+
+* The hierarchical models provide better inferences by pooling information across countries.
+* Assia is the continent with the lowest death rate
+* COVID-19 death rate is about ~20%
+
+### References
+
+- McElreath, R. (2020). Statistical rethinking: A Bayesian course with examples in R and Stan. CRC press.
+
+### Reproducibility
+
+```{r, echo=FALSE}
+sessionInfo()
+```
+

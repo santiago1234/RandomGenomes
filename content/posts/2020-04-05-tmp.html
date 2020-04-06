@@ -1,19 +1,231 @@
 ---
-title: TMP
-author: ~
+title: COVID-19 Death Rate
+author: Santiago G. Medina
 date: '2020-04-05'
 slug: tmp
 math: true
-description: "Here you create a short description about the post"
-categories: []
-tags: []
-draft: yes
+description: "Estimating COVID-19 death rate by country with hierarchical models"
+tags:
+  - bayesian
+  - models
+  - inference
+  - biology
+  - R
+  - analysis
+draft: no
 ---
 
 
 
-<p>This is my first blog post</p>
-<p>A cool equation</p>
+<div id="intro" class="section level2">
+<h2>Intro</h2>
+<p><a href="https://www.newscientist.com/article/2239497-why-we-still-dont-know-what-the-death-rate-is-for-covid-19/">Why we still don’t know what the death rate is for covid-19?</a> Short answer: there is a lot of uncertainty. In this post, we will learn to incorporate this uncertainty in our inferences using a Bayesian hierarchical model.</p>
+<p>Once you get infected with coronavirus only two things can happen either you survive ☺️ or die 😱. Our question is: <strong>Given that I am infected what is the probability of death considering that I live in country X?</strong></p>
+</div>
+<div id="the-data" class="section level2">
+<h2>The data</h2>
+<p>I will use the <a href="https://github.com/joachim-gassen/tidycovid19">tidycovid19</a> package. This package downloads and tidies Covid-19 data from the <a href="https://github.com/CSSEGISandData/COVID-19">Johns Hopkins University CSSE Github Repo</a>. In this data, we ignore the cases that are currently infected because we don’t know what will happen. Some people will die and others survive, our job is to infer how many people will die.</p>
+<pre class="r"><code>library(tidyverse)
+library(ggthemes)
+library(scales)
+library(ggrepel)
+library(tidycovid19)
+library(brms)
+theme_set(theme_tufte(base_family = &#39;Helvetica&#39;))
+
+merged_dta &lt;- download_merged_data(cached = TRUE) # Pull the most recent data
+
+covid &lt;- 
+  merged_dta %&gt;%
+  group_by(country) %&gt;%
+  mutate( # aggregate by country
+    reported_deaths = max(deaths),
+    reported_recovered = max(recovered)
+  ) %&gt;%
+  slice(1:1) %&gt;% 
+  mutate(
+    name = country,
+    R = reported_deaths + reported_recovered,
+    dead = reported_deaths
+  ) %&gt;% 
+  select(name, R, dead) %&gt;% 
+  ungroup()
+
+
+# add continent information
+covid$continent &lt;- countrycode::countrycode(sourcevar = covid$name,
+                                              origin = &quot;country.name&quot;,
+                                              destination = &quot;continent&quot;)
+countries_to_highl &lt;- c(&quot;Mexico&quot;, &quot;China&quot;, &quot;Italy&quot;, &quot;Germany&quot;, &quot;US&quot;)
+
+covid &lt;- covid %&gt;% 
+  filter(!is.na(name), !is.na(continent), R &gt; 0)</code></pre>
+<p>The death rate, we will denote it by <span class="math inline">\(\theta\)</span>, is given by:</p>
 <p><span class="math display">\[
-x = y^2
+\theta = \frac{\text{deads}}{\text{deads + recover}}
 \]</span></p>
+<p>We can estimate this from the data using the formula above.</p>
+<p>An easy way to think about this is: every time a person gets infected a coin is thrown at random with a probability <span class="math inline">\(\theta\)</span> of showing the death face. This probability will depend on multiple factors (e. g. the health of the individual, the health capacity of the country, etc.). We will use uncertainty as a way to quantify our lack of information.</p>
+<pre class="r"><code>covid &lt;- 
+  covid %&gt;% 
+  mutate(
+    dead_rate = (dead / R)
+  )
+
+covid %&gt;% 
+  ggplot(aes(x = reorder(continent, dead_rate, median), y = dead_rate)) +
+  geom_boxplot(fill = &#39;grey90&#39;) +
+  geom_jitter(width = 1/5) +
+  geom_rangeframe() +
+  scale_y_continuous(labels = scales::percent) +
+  labs(
+    x = &quot;Continent&quot;,
+    y = &quot;Death Rate&quot;
+  )</code></pre>
+<p><img src="/posts/2020-04-05-tmp_files/figure-html/boxp-1.png" width="384" /></p>
+<p>The plot above shows the distribution of death rates by continent, each dot is a country. One thing to notice is that there is a lot of variability. For example, some countries have 100% death rate while others 0%. A posible explaination for this variability is:</p>
+<ul>
+<li>There exists an imbalance in sampling. For some countries, we have a few observations, 10 or less, and for other countries (e.g China) we have thousands of observations. This is due to the nature of the pandemic. In Asian countries, the pandemic is in a later stage than in the Americas where we are starting to see cases. Variability tends to be higher when we have fewer observations. We can plot the number of observations (people that were infected but now are dead or recovered) against the estimates.</li>
+</ul>
+<pre class="r"><code>covid %&gt;% 
+  ggplot(aes(x = R, y = dead_rate)) +
+  geom_point(color = &quot;grey&quot;) +
+  geom_text_repel(data = function(x) filter(x, name %in% countries_to_highl), aes(label = name)) +
+  scale_x_sqrt(breaks = c(1000, 10000, 50000, 80000), labels = scales::unit_format(unit = &quot;k&quot;, scale = 1e-3,caccuracy = 1)) +
+  scale_y_continuous(labels = scales::percent) +
+  geom_rangeframe(color = &#39;black&#39;) +
+  labs(
+    y = &quot;Death Rate&quot;,
+    x = &quot;Deaths + Recovered&quot;,
+    title = &quot;Variation is higher in countries with fewer observations&quot;
+  )</code></pre>
+<p><img src="/posts/2020-04-05-tmp_files/figure-html/s1-1.png" width="576" /></p>
+<p>We can see in this plot that most of the extreme values are in the countries that have less than 1000 observations. Our estimates for these countries may be misleading.</p>
+</div>
+<div id="herarchical-model" class="section level2">
+<h2>Herarchical Model</h2>
+<p>With hierarchical models, we can pool information from other countries to produce better estimates for each individual country. This will be beneficial especially for countries with only a few observations since they will receive a stronger regularization or pooling towards the global estimate. Also, for countries with fewer observations, there is more uncertainty and this will be reflected in the posterior estimates. This uncertainty is also propagated to the posterior predictions. This is why Bayes is cool!.</p>
+<p>I will use the following Bayesian Herarchical model to estimate the death rate:</p>
+<p><span class="math display">\[
+\begin{aligned}
+\text{deads}_i &amp;\sim \text{Binomial}(\text{Infections}, \theta_i)\\
+logit(\theta_i) &amp;= \alpha + \alpha_{\text{country}[i]} + \alpha_{\text{continent}[i]} \\
+\alpha_{\text{country}[i]} &amp;\sim \text{Normal}(0,\sigma_{\text{country}}) \\
+\alpha_{\text{continent}[i]} &amp;\sim \text{Normal}(0,\sigma_{\text{continent}}) \\
+\alpha &amp;\sim \text{Normal}(0, 1) \\
+\sigma_{\text{country}} &amp;\sim \text{HalfCauchy}(0, 1) \\
+\sigma_{\text{continent}} &amp;\sim \text{HalfCauchy}(0, 1)
+\end{aligned}
+\]</span></p>
+<p>In this model, for each country we have a parameter <span class="math inline">\(\alpha_{\text{country}[i]}\)</span> and a paramter <span class="math inline">\(\alpha_{\text{continent}[i]}\)</span> for each continent. These parameters can be understood as deviations from the global median.</p>
+<p>To fit this model we will use the <a href="https://github.com/paul-buerkner/brms">brsm</a> package.</p>
+<pre class="r"><code>h_model &lt;- 
+  brm(data = covid,
+      family = binomial,
+      dead | trials(R) ~ 1 + (1 | name) + (1 | continent),
+      iter = 6000, warmup = 1000, chains = 2, cores = 2,
+      seed = 12)</code></pre>
+<p>Now we can look at our new estimates after computing the posterior distribution with Markov Chain Monte Carlo.</p>
+<p><img src="/posts/2020-04-05-tmp_files/figure-html/unnamed-chunk-1-1.png" width="768" /></p>
+<p>Good to see that Mexico has a low rate. Maybe because we eat lots of 🌯. The grey line denotes the global estimate, the dot is the posterior estimate for each country, and the bar is the 80% highest posterior density interval.</p>
+<div id="covid-19-global-death-rate" class="section level3">
+<h3>COVID-19 Global Death Rate</h3>
+<pre class="r"><code>tibble(death_rate = inv_logit_scaled(post$b_Intercept)) %&gt;% 
+  ggplot(aes(x = death_rate)) +
+  geom_density(fill = &quot;orange1&quot;, alpha = 2/3) +
+  scale_x_continuous(labels = percent) +
+  labs(
+    title = &quot;Global posterior estimate&quot;,
+    subtitle = &#39;~20% people dies&#39;,
+    x = &quot;Death rate&quot;
+  ) +
+  theme(axis.text.y = element_blank(), axis.ticks.y = element_blank())</code></pre>
+<p><img src="/posts/2020-04-05-tmp_files/figure-html/unnamed-chunk-2-1.png" width="240" /></p>
+<p>This is our global estimate. I think this number is an upper bound for the real value. Not all people are been tested. Thus, it is easy to know or record a death than a recovery.</p>
+<p><img src="/posts/2020-04-05-tmp_files/figure-html/unnamed-chunk-3-1.png" width="960" /></p>
+</div>
+</div>
+<div id="posterior-predictions" class="section level2">
+<h2>Posterior Predictions</h2>
+<p>Now, I use this model to generate projection based on a hypothetical number of infections for some countries.</p>
+<p><img src="/posts/2020-04-05-tmp_files/figure-html/unnamed-chunk-4-1.png" width="672" /></p>
+<p>We can see how the uncertainty propagates in the posterior prediction. In the plot, the orange area is a 90% posterior prediction interval. The line is the posterior prediction. For China, the country with more data, the model is very sure about the prediction. For Haiti, with a few observations, the model shows a wide prediction interval reflecting our lack of information.</p>
+</div>
+<div id="conclusion" class="section level2">
+<h2>Conclusion</h2>
+<ul>
+<li>The hierarchical models provide better inferences by pooling information across countries.</li>
+<li>Assia is the continent with the lowest death rate</li>
+<li>COVID-19 death rate is about ~20%</li>
+</ul>
+<div id="references" class="section level3">
+<h3>References</h3>
+<ul>
+<li>McElreath, R. (2020). Statistical rethinking: A Bayesian course with examples in R and Stan. CRC press.</li>
+</ul>
+</div>
+<div id="reproducibility" class="section level3">
+<h3>Reproducibility</h3>
+<pre><code>## R version 3.6.2 (2019-12-12)
+## Platform: x86_64-apple-darwin15.6.0 (64-bit)
+## Running under: macOS Mojave 10.14.6
+## 
+## Matrix products: default
+## BLAS:   /Library/Frameworks/R.framework/Versions/3.6/Resources/lib/libRblas.0.dylib
+## LAPACK: /Library/Frameworks/R.framework/Versions/3.6/Resources/lib/libRlapack.dylib
+## 
+## locale:
+## [1] en_US.UTF-8/en_US.UTF-8/en_US.UTF-8/C/en_US.UTF-8/en_US.UTF-8
+## 
+## attached base packages:
+## [1] stats     graphics  grDevices utils     datasets  methods   base     
+## 
+## other attached packages:
+##  [1] rnaturalearthdata_0.1.0 rnaturalearth_0.1.0     sf_0.8-1               
+##  [4] brms_2.12.0             Rcpp_1.0.3              tidycovid19_0.0.0.9000 
+##  [7] ggrepel_0.8.2           scales_1.1.0            ggthemes_4.2.0         
+## [10] forcats_0.4.0           stringr_1.4.0           dplyr_0.8.4            
+## [13] purrr_0.3.3             readr_1.3.1             tidyr_1.0.2            
+## [16] tibble_2.1.3            ggplot2_3.3.0           tidyverse_1.3.0        
+## 
+## loaded via a namespace (and not attached):
+##   [1] colorspace_1.4-1     ellipsis_0.3.0       class_7.3-15        
+##   [4] ggridges_0.5.2       rsconnect_0.8.16     markdown_1.1        
+##   [7] base64enc_0.1-3      fs_1.3.1             rstudioapi_0.11     
+##  [10] farver_2.0.3         rstan_2.19.3         DT_0.12             
+##  [13] fansi_0.4.1          mvtnorm_1.1-0        lubridate_1.7.4     
+##  [16] xml2_1.2.2           codetools_0.2-16     bridgesampling_1.0-0
+##  [19] knitr_1.28           shinythemes_1.1.2    bayesplot_1.7.1     
+##  [22] jsonlite_1.6.1       broom_0.5.4          dbplyr_1.4.2        
+##  [25] rgeos_0.5-2          shiny_1.4.0          compiler_3.6.2      
+##  [28] httr_1.4.1           backports_1.1.5      assertthat_0.2.1    
+##  [31] Matrix_1.2-18        fastmap_1.0.1        cli_2.0.1           
+##  [34] later_1.0.0          htmltools_0.4.0      prettyunits_1.1.1   
+##  [37] tools_3.6.2          igraph_1.2.4.2       coda_0.19-3         
+##  [40] gtable_0.3.0         glue_1.3.1           reshape2_1.4.3      
+##  [43] cellranger_1.1.0     ggdark_0.2.1         vctrs_0.2.2         
+##  [46] countrycode_1.1.1    nlme_3.1-142         blogdown_0.18       
+##  [49] crosstalk_1.0.0      xfun_0.12            ps_1.3.2            
+##  [52] rvest_0.3.5          mime_0.9             miniUI_0.1.1.1      
+##  [55] lifecycle_0.1.0      gtools_3.8.1         zoo_1.8-7           
+##  [58] colourpicker_1.0     hms_0.5.3            promises_1.1.0      
+##  [61] Brobdingnag_1.2-6    parallel_3.6.2       inline_0.3.15       
+##  [64] shinystan_2.5.0      yaml_2.2.1           gridExtra_2.3       
+##  [67] StanHeaders_2.21.0-1 loo_2.2.0            stringi_1.4.6       
+##  [70] dygraphs_1.1.1.6     e1071_1.7-3          pkgbuild_1.0.6      
+##  [73] rlang_0.4.4          pkgconfig_2.0.3      matrixStats_0.56.0  
+##  [76] evaluate_0.14        lattice_0.20-38      labeling_0.3        
+##  [79] rstantools_2.0.0     htmlwidgets_1.5.1    tidyselect_1.0.0    
+##  [82] processx_3.4.2       plyr_1.8.5           magrittr_1.5        
+##  [85] bookdown_0.18        R6_2.4.1             generics_0.0.2      
+##  [88] DBI_1.1.0            pillar_1.4.3         haven_2.2.0         
+##  [91] withr_2.1.2          units_0.6-6          xts_0.12-0          
+##  [94] sp_1.4-1             abind_1.4-5          modelr_0.1.5        
+##  [97] crayon_1.3.4         KernSmooth_2.23-16   rmarkdown_2.1       
+## [100] emo_0.0.0.9000       grid_3.6.2           readxl_1.3.1        
+## [103] callr_3.4.2          threejs_0.3.3        classInt_0.4-2      
+## [106] reprex_0.3.0         digest_0.6.24        xtable_1.8-4        
+## [109] httpuv_1.5.2         stats4_3.6.2         munsell_0.5.0       
+## [112] viridisLite_0.3.0    shinyjs_1.1</code></pre>
+</div>
+</div>
