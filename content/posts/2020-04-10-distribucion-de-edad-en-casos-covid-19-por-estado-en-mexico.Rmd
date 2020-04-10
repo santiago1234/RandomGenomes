@@ -1,0 +1,105 @@
+---
+title: Distribución de edad en casos COVID-19 por estado en México
+author: ~
+date: '2020-04-10'
+slug: distribución-de-edad-en-casos-covid-19-por-estado-en-méxico
+description: "distribucion de edad COVID-19 por estado"
+tags:
+  - dataviz
+  - spanish
+  - R
+  - analysis
+draft: no
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+
+
+Este es el segundo post en la serie COVID-19. En el blog post [anterior](/posts/tmp/) use un modelo Bayesiano jerárquico para estimar la tasa de mortalidad por país. En esta ocasión traigo una visualización de la distribución de casos confirmado por edad.
+
+### Datos
+
+La secretaria de salud actualiza diariamente un [comunicado técnico](https://www.gob.mx/salud/documentos/coronavirus-covid-19-comunicado-tecnico-diario-238449) que incluye los casos confirmados desglosados por estado. Desafortunadamente la secretaria este utilizando un archivo pdf lo cual dificulta la lectura para manipular los datos. 
+
+
+Gracias a [Serendiapia](https://serendipia.digital/) por su portal de datos abiertos, que han estado compartiendo este comunicado técnico en un formato csv, lo cual hace el trabajo de lectura a una línea de codigo. En R, una alternativa para lectura de tablas en formato pdf es el paquete [tabularizer](https://cran.r-project.org/web/packages/tabulizer/vignettes/tabulizer.html), en el caso de estos datos esta opción requiere de procesamiento adicional.
+
+```{r loaddata}
+library(tidyverse)
+library(lubridate)
+library(ggridges)
+library(geofacet)
+library(ggthemes)
+
+
+# form the serendipia ur by extracting the current day - 1
+current_day <- str_replace_all(Sys.Date() - 1, pattern = "-", replacement = '.') 
+url <- paste0(
+  'https://serendipia.digital/wp-content/uploads/2020/04/Tabla_casos_positivos_COVID-19_resultado_InDRE_',
+  current_day,
+  '-Table-1.csv'
+)
+datos_covid <- read_csv(url)
+```
+
+### Visualización
+
+Realizare esta visualización con ggplot2. Algunos paquetes adicionales que utilizare son:
+
+* [gghighlight](https://github.com/yutannihilation/gghighlight) Para remarcar líneas y facilitar su comparación
+* [geofacet](https://hafen.github.io/geofacet/rd.html) Permite utilizar facets que aparentan la distribución geográfica de estados
+
+Aquí esta la grafica
+
+```{r dis_por_estado, fig.width=13, fig.height=11}
+# poner el nombre del estado compatible con facet_geo 
+
+datos_covid <- 
+  datos_covid %>% 
+  mutate(
+    name = str_to_title(Estado),
+    name = stringi::stri_trans_general(str = name, id = "Latin-ASCII"),
+    name = if_else(name == "Ciudad De Mexico", "Distrito Federal", name),
+    fecha = dmy(`Fecha de Inicio de síntomas`)
+  )
+
+## calcula las medias por estado y colocalas en la grafica
+
+datos_covid %>%
+  filter(!is.na(name)) %>% 
+  ggplot(aes(x = Edad, group = name)) +
+  geom_freqpoly(binwidth = 10, size = 1/2, position = 'jitter', color = 'white') +
+  gghighlight::gghighlight(
+    name %in% datos_covid$name, unhighlighted_params = list(size = 1/7, colour = alpha("pink", 0.4))
+  ) + 
+  labs(
+    x = "Edad [años]",
+    y = "No. de casos confirmados",
+    title = "Distribucion de casos COVID-19 por edad en Mexico",
+    caption = paste("https://santiagogmedina.com | ",
+                    "Actualizado: ", Sys.Date() - 1,
+                    " | Fuente: comunicado técnico diario, secretaria de salud")
+  ) +
+  scale_x_continuous(breaks = c(10, 40, 70)) +
+  scale_y_sqrt(breaks = c(10, 100, 200)) +
+  facet_geo(~name, grid = 'mx_state_grid1') +
+  #theme_tufte(base_family = 'Helvetica') +
+  ggdark::dark_theme_minimal()
+
+
+```
+
+### Conclusiones 
+
+* Existe una ausencia de casos reportados en individuos con menos de 10 años.
+* En esta grafica podemos observar las regiones con mayor incidencia que es el norte del país especialmente Baja California Norte y el centro del país (CDMX y el estado de México).
+
+### Reproducibility
+
+```{r, echo=FALSE}
+sessionInfo()
+```
+

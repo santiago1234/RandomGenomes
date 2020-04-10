@@ -1,0 +1,135 @@
+---
+title: Distribución de edad en casos COVID-19 por estado en México
+author: ~
+date: '2020-04-10'
+slug: distribución-de-edad-en-casos-covid-19-por-estado-en-méxico
+description: "distribucion de edad COVID-19 por estado"
+tags:
+  - dataviz
+  - spanish
+  - R
+  - analysis
+draft: no
+---
+
+
+
+<p>Este es el segundo post en la serie COVID-19. En el blog post <a href="/posts/tmp/">anterior</a> use un modelo Bayesiano jerárquico para estimar la tasa de mortalidad por país. En esta ocasión traigo una visualización de la distribución de casos confirmado por edad.</p>
+<div id="datos" class="section level3">
+<h3>Datos</h3>
+<p>La secretaria de salud actualiza diariamente un <a href="https://www.gob.mx/salud/documentos/coronavirus-covid-19-comunicado-tecnico-diario-238449">comunicado técnico</a> que incluye los casos confirmados desglosados por estado. Desafortunadamente la secretaria este utilizando un archivo pdf lo cual dificulta la lectura para manipular los datos.</p>
+<p>Gracias a <a href="https://serendipia.digital/">Serendiapia</a> por su portal de datos abiertos, que han estado compartiendo este comunicado técnico en un formato csv, lo cual hace el trabajo de lectura a una línea de codigo. En R, una alternativa para lectura de tablas en formato pdf es el paquete <a href="https://cran.r-project.org/web/packages/tabulizer/vignettes/tabulizer.html">tabularizer</a>, en el caso de estos datos esta opción requiere de procesamiento adicional.</p>
+<pre class="r"><code>library(tidyverse)
+library(lubridate)
+library(ggridges)
+library(geofacet)
+library(ggthemes)
+
+
+# form the serendipia ur by extracting the current day - 1
+current_day &lt;- str_replace_all(Sys.Date() - 1, pattern = &quot;-&quot;, replacement = &#39;.&#39;) 
+url &lt;- paste0(
+  &#39;https://serendipia.digital/wp-content/uploads/2020/04/Tabla_casos_positivos_COVID-19_resultado_InDRE_&#39;,
+  current_day,
+  &#39;-Table-1.csv&#39;
+)
+datos_covid &lt;- read_csv(url)</code></pre>
+</div>
+<div id="visualización" class="section level3">
+<h3>Visualización</h3>
+<p>Realizare esta visualización con ggplot2. Algunos paquetes adicionales que utilizare son:</p>
+<ul>
+<li><a href="https://github.com/yutannihilation/gghighlight">gghighlight</a> Para remarcar líneas y facilitar su comparación</li>
+<li><a href="https://hafen.github.io/geofacet/rd.html">geofacet</a> Permite utilizar facets que aparentan la distribución geográfica de estados</li>
+</ul>
+<p>Aquí esta la grafica</p>
+<pre class="r"><code># poner el nombre del estado compatible con facet_geo 
+
+datos_covid &lt;- 
+  datos_covid %&gt;% 
+  mutate(
+    name = str_to_title(Estado),
+    name = stringi::stri_trans_general(str = name, id = &quot;Latin-ASCII&quot;),
+    name = if_else(name == &quot;Ciudad De Mexico&quot;, &quot;Distrito Federal&quot;, name),
+    fecha = dmy(`Fecha de Inicio de síntomas`)
+  )
+
+## calcula las medias por estado y colocalas en la grafica
+
+datos_covid %&gt;%
+  filter(!is.na(name)) %&gt;% 
+  ggplot(aes(x = Edad, group = name)) +
+  geom_freqpoly(binwidth = 10, size = 1/2, position = &#39;jitter&#39;, color = &#39;white&#39;) +
+  gghighlight::gghighlight(
+    name %in% datos_covid$name, unhighlighted_params = list(size = 1/7, colour = alpha(&quot;pink&quot;, 0.4))
+  ) + 
+  labs(
+    x = &quot;Edad [años]&quot;,
+    y = &quot;No. de casos confirmados&quot;,
+    title = &quot;Distribucion de casos COVID-19 por edad en Mexico&quot;,
+    caption = paste(&quot;https://santiagogmedina.com | &quot;,
+                    &quot;Actualizado: &quot;, Sys.Date() - 1,
+                    &quot; | Fuente: comunicado técnico diario, secretaria de salud&quot;)
+  ) +
+  scale_x_continuous(breaks = c(10, 40, 70)) +
+  scale_y_sqrt(breaks = c(10, 100, 200)) +
+  facet_geo(~name, grid = &#39;mx_state_grid1&#39;) +
+  #theme_tufte(base_family = &#39;Helvetica&#39;) +
+  ggdark::dark_theme_minimal()</code></pre>
+<p><img src="/posts/2020-04-10-distribucion-de-edad-en-casos-covid-19-por-estado-en-mexico_files/figure-html/dis_por_estado-1.png" width="1248" /></p>
+</div>
+<div id="conclusiones" class="section level3">
+<h3>Conclusiones</h3>
+<ul>
+<li>Existe una ausencia de casos reportados en individuos con menos de 10 años.</li>
+<li>En esta grafica podemos observar las regiones con mayor incidencia que es el norte del país especialmente Baja California Norte y el centro del país (CDMX y el estado de México).</li>
+</ul>
+</div>
+<div id="reproducibility" class="section level3">
+<h3>Reproducibility</h3>
+<pre><code>## R version 3.6.2 (2019-12-12)
+## Platform: x86_64-apple-darwin15.6.0 (64-bit)
+## Running under: macOS Mojave 10.14.6
+## 
+## Matrix products: default
+## BLAS:   /Library/Frameworks/R.framework/Versions/3.6/Resources/lib/libRblas.0.dylib
+## LAPACK: /Library/Frameworks/R.framework/Versions/3.6/Resources/lib/libRlapack.dylib
+## 
+## locale:
+## [1] en_US.UTF-8/en_US.UTF-8/en_US.UTF-8/C/en_US.UTF-8/en_US.UTF-8
+## 
+## attached base packages:
+## [1] stats     graphics  grDevices utils     datasets  methods   base     
+## 
+## other attached packages:
+##  [1] ggthemes_4.2.0  geofacet_0.1.10 ggridges_0.5.2  lubridate_1.7.4
+##  [5] forcats_0.4.0   stringr_1.4.0   dplyr_0.8.4     purrr_0.3.3    
+##  [9] readr_1.3.1     tidyr_1.0.2     tibble_2.1.3    ggplot2_3.3.0  
+## [13] tidyverse_1.3.0
+## 
+## loaded via a namespace (and not attached):
+##  [1] httr_1.4.1          rnaturalearth_0.1.0 gghighlight_0.3.0  
+##  [4] jsonlite_1.6.1      modelr_0.1.5        assertthat_0.2.1   
+##  [7] sp_1.4-1            cellranger_1.1.0    yaml_2.2.1         
+## [10] ggrepel_0.8.2       pillar_1.4.3        backports_1.1.5    
+## [13] lattice_0.20-38     glue_1.3.1          digest_0.6.24      
+## [16] rvest_0.3.5         colorspace_1.4-1    htmltools_0.4.0    
+## [19] plyr_1.8.5          pkgconfig_2.0.3     broom_0.5.4        
+## [22] haven_2.2.0         bookdown_0.18       scales_1.1.0       
+## [25] jpeg_0.1-8.1        generics_0.0.2      farver_2.0.3       
+## [28] withr_2.1.2         ggdark_0.2.1        cli_2.0.1          
+## [31] magrittr_1.5        crayon_1.3.4        readxl_1.3.1       
+## [34] evaluate_0.14       fs_1.3.1            fansi_0.4.1        
+## [37] nlme_3.1-142        xml2_1.2.2          class_7.3-15       
+## [40] blogdown_0.18       tools_3.6.2         imguR_1.0.3        
+## [43] hms_0.5.3           lifecycle_0.1.0     munsell_0.5.0      
+## [46] geogrid_0.1.1       reprex_0.3.0        compiler_3.6.2     
+## [49] e1071_1.7-3         rlang_0.4.4         classInt_0.4-2     
+## [52] units_0.6-6         grid_3.6.2          rstudioapi_0.11    
+## [55] rmarkdown_2.1       gtable_0.3.0        DBI_1.1.0          
+## [58] curl_4.3            R6_2.4.1            gridExtra_2.3      
+## [61] knitr_1.28          rgeos_0.5-2         KernSmooth_2.23-16 
+## [64] stringi_1.4.6       Rcpp_1.0.3          vctrs_0.2.2        
+## [67] sf_0.8-1            png_0.1-7           dbplyr_1.4.2       
+## [70] tidyselect_1.0.0    xfun_0.12</code></pre>
+</div>
