@@ -206,7 +206,8 @@ results_df %>%
         panel.grid = element_blank()) +
   labs(
     y = 'Death Rate',
-    title = "Posterior Estimates"
+    title = "Posterior Estimates",
+    caption = paste0('analysis updated on: ', Sys.Date())
   ) 
 
 ```

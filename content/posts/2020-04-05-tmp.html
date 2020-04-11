@@ -127,7 +127,7 @@ logit(\theta_i) &amp;= \alpha + \alpha_{\text{country}[i]} + \alpha_{\text{conti
       seed = 12)</code></pre>
 <p>Now we can look at our new estimates after computing the posterior distribution with Markov Chain Monte Carlo.</p>
 <p><img src="/posts/2020-04-05-tmp_files/figure-html/unnamed-chunk-1-1.png" width="768" /></p>
-<p>Good to see that Mexico has a low rate. Maybe because we eat lots of 🌯. The grey line denotes the global estimate, the dot is the posterior estimate for each country, and the bar is the 80% highest posterior density interval.</p>
+<p>Good to see that Mexico has a low rate. Maybe because we eat lots of 🌮. The grey line denotes the global estimate, the dot is the posterior estimate for each country, and the bar is the 80% highest posterior density interval.</p>
 <div id="covid-19-global-death-rate" class="section level3">
 <h3>COVID-19 Global Death Rate</h3>
 <pre class="r"><code>tibble(death_rate = inv_logit_scaled(post$b_Intercept)) %&gt;% 
